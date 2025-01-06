@@ -1,47 +1,15 @@
-ai_upgrade_assistant.upgrade_dashboard:
+ai_upgrade_assistant.upgrade:
   path: '/admin/reports/upgrade-assistant'
   defaults:
-    _controller: '\Drupal\ai_upgrade_assistant\Controller\DashboardController::dashboard'
+    _controller: '\Drupal\ai_upgrade_assistant\Controller\UpgradeController::overview'
     _title: 'AI Upgrade Assistant'
   requirements:
-    _permission: 'access upgrade assistant'
+    _permission: 'access upgrade status'
 
-ai_upgrade_assistant.settings:
-  path: '/admin/config/development/upgrade-assistant/settings'
+ai_upgrade_assistant.check_status:
+  path: '/admin/reports/upgrade-assistant/check-status'
   defaults:
-    _form: '\Drupal\ai_upgrade_assistant\Form\SettingsForm'
-    _title: 'AI Upgrade Assistant Settings'
+    _controller: '\Drupal\ai_upgrade_assistant\Controller\UpgradeController::checkStatus'
+    _title: 'Check Status'
   requirements:
-    _permission: 'administer upgrade assistant'
-
-ai_upgrade_assistant.analyze:
-  path: '/admin/reports/upgrade-assistant/analyze'
-  defaults:
-    _controller: '\Drupal\ai_upgrade_assistant\Controller\AnalysisController::startAnalysis'
-    _title: 'Start Analysis'
-  requirements:
-    _permission: 'access upgrade assistant'
-
-ai_upgrade_assistant.progress:
-  path: '/admin/reports/upgrade-assistant/progress'
-  defaults:
-    _controller: '\Drupal\ai_upgrade_assistant\Controller\AnalysisController::getProgress'
-    _title: 'Analysis Progress'
-  requirements:
-    _permission: 'access upgrade assistant'
-
-ai_upgrade_assistant.recommendations:
-  path: '/admin/reports/upgrade-assistant/recommendations'
-  defaults:
-    _controller: '\Drupal\ai_upgrade_assistant\Controller\AnalysisController::getRecommendations'
-    _title: 'Get Recommendations'
-  requirements:
-    _permission: 'access upgrade assistant'
-
-ai_upgrade_assistant.diff:
-  path: '/admin/reports/upgrade-assistant/diff/{file_path}'
-  defaults:
-    _controller: '\Drupal\ai_upgrade_assistant\Controller\AnalysisController::getDiffView'
-    _title: 'Code Changes'
-  requirements:
-    _permission: 'access upgrade assistant'
+    _permission: 'access upgrade status'

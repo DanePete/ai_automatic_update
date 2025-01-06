@@ -24,3 +24,16 @@ diff_view:
     - core/jquery
     - core/drupal
     - core/jquery.once
+
+upgrade_assistant:
+  version: 1.x
+  css:
+    theme:
+      css/upgrade_assistant.css: {}
+  js:
+    js/upgrade_assistant.js: {}
+  dependencies:
+    - core/jquery
+    - core/drupal
+    - core/drupalSettings
+    - core/jquery.once

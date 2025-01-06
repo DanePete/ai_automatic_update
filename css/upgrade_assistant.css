@@ -1,0 +1,39 @@
+.upgrade-assistant-status,
+.upgrade-assistant-actions {
+  max-width: 800px;
+  margin: 20px 0;
+  padding: 20px;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.upgrade-action {
+  margin: 20px 0;
+  padding: 15px;
+  background: #f5f5f5;
+  border-left: 4px solid #0074bd;
+  border-radius: 0 4px 4px 0;
+}
+
+.upgrade-action pre {
+  background: #2d2d2d;
+  color: #fff;
+  padding: 10px;
+  border-radius: 4px;
+  margin: 10px 0;
+}
+
+.upgrade-action button {
+  margin-top: 10px;
+  background: #0074bd;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.upgrade-action button:hover {
+  background: #005c94;
+}

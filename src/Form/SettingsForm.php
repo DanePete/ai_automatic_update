@@ -132,6 +132,62 @@ class SettingsForm extends ConfigFormBase {
       '#description' => $this->t('Analyze themes for compatibility issues and improvement suggestions.'),
     ];
 
+    $form['analysis_settings']['recheck_interval'] = [
+      '#type' => 'select',
+      '#title' => $this->t('Recheck Interval'),
+      '#description' => $this->t('How often should modules be reanalyzed?'),
+      '#default_value' => $config->get('recheck_interval') ?? 604800,
+      '#options' => [
+        86400 => $this->t('Daily'),
+        604800 => $this->t('Weekly'),
+        2592000 => $this->t('Monthly'),
+        7776000 => $this->t('Every 3 months'),
+      ],
+    ];
+
+    $form['analysis_settings']['auto_analyze'] = [
+      '#type' => 'checkbox',
+      '#title' => $this->t('Auto-analyze after module updates'),
+      '#description' => $this->t('Automatically analyze modules after they are updated.'),
+      '#default_value' => $config->get('auto_analyze') ?? TRUE,
+    ];
+
+    $form['analysis_settings']['notify_updates'] = [
+      '#type' => 'checkbox',
+      '#title' => $this->t('Notify about available updates'),
+      '#description' => $this->t('Show a notification when minor updates are available.'),
+      '#default_value' => $config->get('notify_updates') ?? TRUE,
+    ];
+
+    // Add stats if available
+    if ($tracker = \Drupal::service('ai_upgrade_assistant.analysis_tracker')) {
+      $stats = $tracker->getAnalysisStats();
+      
+      if ($stats['last_analysis']) {
+        $last_run = \Drupal::service('date.formatter')->formatTimeDiffSince($stats['last_analysis']);
+        
+        $form['stats'] = [
+          '#type' => 'fieldset',
+          '#title' => $this->t('Analysis Statistics'),
+          '#tree' => TRUE,
+        ];
+
+        $form['stats']['summary'] = [
+          '#markup' => $this->t('
+            <p>Last analysis: @last_run ago</p>
+            <p>Total modules analyzed: @total</p>
+            <p>Modules needing reanalysis: @recheck</p>
+            <p>Modules never analyzed: @never</p>
+          ', [
+            '@last_run' => $last_run,
+            '@total' => $stats['total_analyzed'],
+            '@recheck' => $stats['needs_reanalysis'],
+            '@never' => $stats['never_analyzed'],
+          ]),
+        ];
+      }
+    }
+
     $form['patch_settings'] = [
       '#type' => 'details',
       '#title' => $this->t('Patch Settings'),
@@ -243,6 +299,9 @@ class SettingsForm extends ConfigFormBase {
       ->set('report_format', $form_state->getValue('report_format'))
       ->set('test_mode', $form_state->getValue('test_mode'))
       ->set('fallback_to_mock', $form_state->getValue('fallback_to_mock'))
+      ->set('recheck_interval', $form_state->getValue('recheck_interval'))
+      ->set('auto_analyze', $form_state->getValue('auto_analyze'))
+      ->set('notify_updates', $form_state->getValue('notify_updates'))
       ->save();
 
     parent::submitForm($form, $form_state);

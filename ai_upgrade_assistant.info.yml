@@ -1,10 +1,10 @@
 name: AI Upgrade Assistant
 type: module
-description: 'Uses AI to assist with Drupal upgrades by analyzing code and providing recommendations.'
+description: 'Uses AI to assist with Drupal upgrades and module updates, including Drupal 11 readiness checks.'
 package: Development
-core_version_requirement: ^9 || ^10
+core_version_requirement: ^9 || ^10 || ^11
 configure: ai_upgrade_assistant.settings
 dependencies:
   - drupal:system
-  - drupal:user
+  - drupal:update
   - upgrade_status:upgrade_status

@@ -218,19 +218,18 @@ class BatchAnalyzer {
         [$this, 'processModule'],
         [
           $module,
-          $this->currentUser->id(),
+          \Drupal::currentUser()->id(),
         ],
       ];
     }
 
     return [
       'operations' => $operations,
-      'finished' => [$this, 'finishBatch'],
+      'finished' => [$this, 'finishModuleAnalysis'],
       'title' => $this->t('Analyzing modules for upgrade compatibility'),
       'init_message' => $this->t('Starting code analysis...'),
       'progress_message' => $this->t('Analyzed @current out of @total modules.'),
       'error_message' => $this->t('Error analyzing modules.'),
-      'file' => drupal_get_path('module', 'ai_upgrade_assistant') . '/src/Service/BatchAnalyzer.php',
     ];
   }
 
@@ -317,9 +316,9 @@ class BatchAnalyzer {
   }
 
   /**
-   * Batch finish callback.
+   * Finish callback for module analysis batch.
    */
-  public function finishBatch($success, $results, $operations) {
+  public function finishModuleAnalysis($success, $results, $operations) {
     $logger = \Drupal::logger('ai_upgrade_assistant');
     
     if ($success) {
@@ -333,6 +332,9 @@ class BatchAnalyzer {
       $logger->info('Batch analysis completed successfully: @message', [
         '@message' => $message,
       ]);
+
+      // Update last analysis time
+      $this->state->set('ai_upgrade_assistant.last_analysis', time());
     }
     else {
       $error_message = $this->t('Some errors occurred during analysis.');

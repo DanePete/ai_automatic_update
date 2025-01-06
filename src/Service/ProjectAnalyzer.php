@@ -157,8 +157,19 @@ class ProjectAnalyzer {
       foreach ($project_info['custom_modules'] as $name => $info) {
         $module_path = $this->moduleHandler->getModule($name)->getPath();
         $results = $this->analyzeCustomModule($name, $module_path);
-        if (!empty($results['recommendations'])) {
-          $recommendations = array_merge($recommendations, $results['recommendations']);
+        if (!empty($results['summary'])) {
+          $recommendations[] = [
+            'type' => 'custom_module_analysis',
+            'priority' => 'medium',
+            'message' => t('Custom module @name analyzed', ['@name' => $name]),
+            'actions' => [
+              [
+                'label' => t('View analysis results'),
+                'url' => '#',
+              ],
+            ],
+            'results' => $results['summary'],
+          ];
         }
       }
     }
@@ -190,214 +201,126 @@ class ProjectAnalyzer {
   /**
    * Analyzes a custom module for upgrade compatibility.
    *
-   * @param string $module
-   *   The module name.
+   * @param string $module_name
+   *   The name of the module to analyze.
    * @param string $module_path
-   *   The module path.
+   *   The path to the module.
    *
    * @return array
    *   Analysis results.
    */
-  public function analyzeCustomModule($module, $module_path) {
+  public function analyzeCustomModule($module_name, $module_path) {
     $results = [
-      'module' => $module,
+      'module' => $module_name,
+      'path' => $module_path,
       'files' => [],
       'errors' => [],
       'warnings' => [],
-      'recommendations' => [],
+      'summary' => [],
     ];
 
     try {
-      // First, get deprecation analysis from Upgrade Status
-      $deprecation_results = $this->deprecationAnalyzer->analyze($module_path);
-      
-      // Process deprecation results
-      foreach ($deprecation_results as $file => $issues) {
-        $file_results = [
-          'path' => $file,
-          'issues' => [],
-        ];
+      // Get module info
+      $module_info = \Drupal::service('extension.list.module')->getExtensionInfo($module_name);
+      $results['info'] = $module_info;
 
-        foreach ($issues as $issue) {
-          $file_results['issues'][] = [
-            'line' => $issue['line'],
-            'message' => $issue['message'],
-            'severity' => $issue['severity'],
-          ];
-        }
-
-        $results['files'][$file] = $file_results;
+      // Check core compatibility
+      if (isset($module_info['core_version_requirement'])) {
+        $results['core_compatible'] = $this->isCompatibleWithDrupal10($module_info['core_version_requirement']);
       }
 
-      // For each file with issues, get AI recommendations
-      foreach ($results['files'] as $file => $file_results) {
-        if (!empty($file_results['issues'])) {
-          $file_path = $module_path . '/' . $file;
-          if (file_exists($file_path)) {
-            $code = file_get_contents($file_path);
-            
-            // Prepare context for AI analysis
-            $context = [
-              'module' => $module,
-              'file' => $file,
-              'issues' => $file_results['issues'],
-              'drupal_version' => \Drupal::VERSION,
-            ];
+      // Find PHP files
+      $files = $this->findPhpFiles($module_path);
+      
+      // Analyze each file
+      foreach ($files as $file) {
+        $code = file_get_contents($file);
+        if ($code === FALSE) {
+          $results['errors'][] = "Could not read file: $file";
+          continue;
+        }
 
-            // Get AI recommendations
-            $ai_analysis = $this->openai->analyzeCode($code, $context);
-            if ($ai_analysis) {
-              $results['files'][$file]['ai_recommendations'] = $ai_analysis;
-              
-              // Add overall recommendations
-              if (!empty($ai_analysis['recommendations'])) {
-                $results['recommendations'] = array_merge(
-                  $results['recommendations'],
-                  $ai_analysis['recommendations']
-                );
-              }
-            }
+        $relative_path = str_replace(DRUPAL_ROOT . '/', '', $file);
+        
+        try {
+          $file_analysis = $this->analyzeFileContent($code, [
+            'file' => $relative_path,
+            'module' => $module_name,
+          ]);
+          
+          $results['files'][$relative_path] = $file_analysis;
+
+          // Aggregate warnings and errors
+          if (!empty($file_analysis['warnings'])) {
+            $results['warnings'] = array_merge(
+              $results['warnings'],
+              array_map(
+                function($warning) use ($relative_path) {
+                  return "$relative_path: $warning";
+                },
+                $file_analysis['warnings']
+              )
+            );
           }
         }
+        catch (\Exception $e) {
+          $results['errors'][] = "Error analyzing $relative_path: " . $e->getMessage();
+        }
       }
 
-      return $results;
+      // Generate summary
+      $results['summary'] = [
+        'files_analyzed' => count($results['files']),
+        'warnings_found' => count($results['warnings']),
+        'errors_found' => count($results['errors']),
+      ];
     }
     catch (\Exception $e) {
-      \Drupal::logger('ai_upgrade_assistant')->error('Error analyzing module @module: @error', [
-        '@module' => $module,
-        '@error' => $e->getMessage(),
-      ]);
-      
-      $results['errors'][] = $e->getMessage();
-      return $results;
+      $results['errors'][] = "Module analysis error: " . $e->getMessage();
     }
+
+    return $results;
   }
 
   /**
-   * Analyzes code for upgrade compatibility.
+   * Analyzes a single file's content.
    *
    * @param string $code
-   *   The code to analyze.
+   *   The code content to analyze.
    * @param array $context
    *   Analysis context.
    *
    * @return array
    *   Analysis results.
    */
-  protected function analyzeCode($code, $context) {
+  protected function analyzeFileContent($code, array $context) {
+    $analysis = [
+      'warnings' => [],
+      'deprecated_functions' => [],
+      'suggestions' => [],
+    ];
+
+    // Use OpenAI for deeper analysis
     try {
-      // Try OpenAI analysis first
-      $response = $this->openai->analyzeCode($code, $context);
-      if (!empty($response)) {
-        return $this->processAnalysisResponse($response);
+      $ai_analysis = $this->openai->analyzeCode($code, [
+        'type' => 'file',
+        'context' => $context,
+        'drupal_version' => \Drupal::VERSION,
+        'target_version' => '10.0.0',
+      ]);
+
+      if (!empty($ai_analysis['warnings'])) {
+        $analysis['warnings'] = array_merge($analysis['warnings'], $ai_analysis['warnings']);
+      }
+      if (!empty($ai_analysis['suggestions'])) {
+        $analysis['suggestions'] = $ai_analysis['suggestions'];
       }
     }
     catch (\Exception $e) {
-      \Drupal::logger('ai_upgrade_assistant')->warning('OpenAI analysis failed: @error. Falling back to static analysis.', [
-        '@error' => $e->getMessage(),
-      ]);
+      $analysis['warnings'][] = "AI analysis failed: " . $e->getMessage();
     }
 
-    // Fallback to static analysis if OpenAI fails
-    return $this->performStaticAnalysis($code);
-  }
-
-  /**
-   * Performs static code analysis without OpenAI.
-   *
-   * @param string $code
-   *   The code to analyze.
-   *
-   * @return array
-   *   Analysis results.
-   */
-  protected function performStaticAnalysis($code) {
-    $issues = [];
-    
-    // Check for common deprecated functions
-    $deprecated_functions = [
-      'drupal_get_path' => [
-        'replacement' => '\Drupal::service(\'extension.list.module\')->getPath()',
-        'description' => 'drupal_get_path() is deprecated in Drupal 9.3.0 and will be removed in Drupal 10.0.0. Use the extension.list.module_type service instead.',
-      ],
-      'file_create_url' => [
-        'replacement' => '\Drupal\Core\Url::fromUri(\'public://example.txt\')->toString()',
-        'description' => 'file_create_url() is deprecated in Drupal 8.0.0 and will be removed before Drupal 9.0.0. Use URL generation instead.',
-      ],
-      'drupal_render' => [
-        'replacement' => '\Drupal::service(\'renderer\')->render($elements)',
-        'description' => 'drupal_render() is deprecated in Drupal 8.0.0 and will be removed before Drupal 9.0.0. Use the renderer service instead.',
-      ],
-      'drupal_set_message' => [
-        'replacement' => '\Drupal::messenger()->addMessage()',
-        'description' => 'drupal_set_message() is deprecated in Drupal 8.5.0 and will be removed before Drupal 9.0.0. Use Drupal\Core\Messenger\MessengerInterface instead.',
-      ],
-    ];
-
-    foreach ($deprecated_functions as $function => $info) {
-      if (preg_match("/$function\s*\(/", $code)) {
-        $issues[] = [
-          'type' => 'deprecation',
-          'description' => $info['description'],
-          'priority' => 'critical',
-          'current_code' => "$function()",
-          'code_example' => $info['replacement'],
-          'line_number' => 0, // Would need better parsing to get actual line numbers
-        ];
-      }
-    }
-
-    // Check for deprecated constants
-    $deprecated_constants = [
-      'DRUPAL_ROOT' => [
-        'replacement' => 'Use dependency injection or the app.root service',
-        'description' => 'DRUPAL_ROOT constant usage is discouraged. Use dependency injection instead.',
-      ],
-      'REQUEST_TIME' => [
-        'replacement' => '\Drupal::time()->getRequestTime()',
-        'description' => 'REQUEST_TIME constant is deprecated. Use the time service instead.',
-      ],
-    ];
-
-    foreach ($deprecated_constants as $constant => $info) {
-      if (strpos($code, $constant) !== FALSE) {
-        $issues[] = [
-          'type' => 'deprecation',
-          'description' => $info['description'],
-          'priority' => 'warning',
-          'current_code' => $constant,
-          'code_example' => $info['replacement'],
-          'line_number' => 0,
-        ];
-      }
-    }
-
-    // Check for global function usage
-    if (preg_match_all('/\\\\?Drupal::[a-zA-Z_]+\(\)/', $code, $matches)) {
-      $issues[] = [
-        'type' => 'best_practice',
-        'description' => 'Direct service calls using \Drupal should be avoided in favor of dependency injection.',
-        'priority' => 'warning',
-        'current_code' => implode(', ', $matches[0]),
-        'code_example' => "// Inject services in constructor instead:\nprivate \$someService;\n\npublic function __construct(SomeServiceInterface \$some_service) {\n  \$this->someService = \$some_service;\n}",
-        'line_number' => 0,
-      ];
-    }
-
-    // Check for proper namespacing
-    if (!preg_match('/^namespace\s+Drupal/', $code)) {
-      $issues[] = [
-        'type' => 'standards',
-        'description' => 'Drupal code should be properly namespaced under the Drupal namespace.',
-        'priority' => 'warning',
-        'current_code' => '// No namespace declaration found',
-        'code_example' => "namespace Drupal\\module_name\\SubNamespace;",
-        'line_number' => 0,
-      ];
-    }
-
-    return ['issues' => $issues];
+    return $analysis;
   }
 
   /**
