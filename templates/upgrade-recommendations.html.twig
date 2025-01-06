@@ -1,0 +1,69 @@
+{#
+/**
+ * @file
+ * Default theme implementation for displaying upgrade recommendations.
+ *
+ * Available variables:
+ * - recommendations: Array of recommendations for each module.
+ *   - module_name: Name of the module.
+ *   - status: Analysis status.
+ *   - recommendations: Array of specific recommendations.
+ *   - errors: Array of errors encountered during analysis.
+ *   - warnings: Array of warnings.
+ *   - timestamp: When the analysis was performed.
+ *   - analyzed_by: User ID who initiated the analysis.
+ *
+ * @ingroup themeable
+ */
+#}
+
+<div class="upgrade-recommendations">
+  {% if recommendations is empty %}
+    <div class="empty-message">
+      <p>{{ 'No recommendations available. Please run the analysis first.'|t }}</p>
+    </div>
+  {% else %}
+    {% for module_name, data in recommendations %}
+      <div class="module-recommendations">
+        <h2>{{ module_name }}</h2>
+        
+        <div class="metadata">
+          <span class="timestamp">{{ 'Analyzed on:'|t }} {{ data.timestamp|date('Y-m-d H:i:s') }}</span>
+        </div>
+
+        {% if data.status == 'error' %}
+          <div class="error messages">
+            {{ 'Error analyzing module:'|t }} {{ data.error }}
+          </div>
+        {% else %}
+          {% if data.recommendations is not empty %}
+            <h3>{{ 'Recommendations'|t }}</h3>
+            <ul class="recommendations-list">
+              {% for rec in data.recommendations %}
+                <li>{{ rec }}</li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+
+          {% if data.warnings is not empty %}
+            <h3>{{ 'Warnings'|t }}</h3>
+            <ul class="warnings-list">
+              {% for warning in data.warnings %}
+                <li>{{ warning }}</li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+
+          {% if data.errors is not empty %}
+            <h3>{{ 'Errors'|t }}</h3>
+            <ul class="errors-list">
+              {% for error in data.errors %}
+                <li>{{ error }}</li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+        {% endif %}
+      </div>
+    {% endfor %}
+  {% endif %}
+</div>

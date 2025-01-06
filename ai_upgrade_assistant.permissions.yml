@@ -1,0 +1,9 @@
+access upgrade assistant:
+  title: 'Access AI Upgrade Assistant'
+  description: 'View the AI Upgrade Assistant dashboard and recommendations.'
+  restrict access: true
+
+administer upgrade assistant:
+  title: 'Administer AI Upgrade Assistant'
+  description: 'Configure AI Upgrade Assistant settings and manage OpenAI integration.'
+  restrict access: true
