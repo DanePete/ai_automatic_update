@@ -1,19 +1,28 @@
 services:
   ai_upgrade_assistant.project_analyzer:
     class: Drupal\ai_upgrade_assistant\Service\ProjectAnalyzer
-    arguments: ['@module_handler', '@config.factory', '@file_system', '@ai_upgrade_assistant.openai']
-    
+    arguments:
+      - '@module_handler'
+      - '@config.factory'
+      - '@file_system'
+      - '@ai_upgrade_assistant.openai'
+      - '@upgrade_status.deprecation_analyzer'
+
   ai_upgrade_assistant.openai:
     class: Drupal\ai_upgrade_assistant\Service\OpenAIService
-    arguments: ['@http_client', '@config.factory', '@logger.factory']
+    arguments:
+      - '@http_client'
+      - '@config.factory'
+      - '@logger.factory'
 
   ai_upgrade_assistant.batch_analyzer:
     class: Drupal\ai_upgrade_assistant\Service\BatchAnalyzer
-    arguments: 
-      - '@ai_upgrade_assistant.project_analyzer'
+    arguments:
+      - '@module_handler'
+      - '@current_user'
       - '@state'
       - '@string_translation'
-      - '@module_handler'
+      - '@ai_upgrade_assistant.project_analyzer'
 
   ai_upgrade_assistant.patch_generator:
     class: Drupal\ai_upgrade_assistant\Service\PatchGenerator

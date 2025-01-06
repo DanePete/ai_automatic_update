@@ -7,6 +7,7 @@ use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\File\FileSystemInterface;
 use Symfony\Component\Process\Process;
 use Drupal\ai_upgrade_assistant\Service\OpenAIService;
+use Drupal\upgrade_status\DeprecationAnalyzer;
 
 /**
  * Service for analyzing Drupal project for upgrades.
@@ -42,6 +43,13 @@ class ProjectAnalyzer {
   protected $openai;
 
   /**
+   * The upgrade status analyzer service.
+   *
+   * @var \Drupal\upgrade_status\DeprecationAnalyzer
+   */
+  protected $deprecationAnalyzer;
+
+  /**
    * Constructs a ProjectAnalyzer object.
    *
    * @param \Drupal\Core\Extension\ModuleHandlerInterface $module_handler
@@ -52,17 +60,21 @@ class ProjectAnalyzer {
    *   The file system service.
    * @param \Drupal\ai_upgrade_assistant\Service\OpenAIService $openai
    *   The OpenAI service.
+   * @param \Drupal\upgrade_status\DeprecationAnalyzer $deprecation_analyzer
+   *   The deprecation analyzer service.
    */
   public function __construct(
     ModuleHandlerInterface $module_handler,
     ConfigFactoryInterface $config_factory,
     FileSystemInterface $file_system,
-    OpenAIService $openai
+    OpenAIService $openai,
+    DeprecationAnalyzer $deprecation_analyzer
   ) {
     $this->moduleHandler = $module_handler;
     $this->configFactory = $config_factory;
     $this->fileSystem = $file_system;
     $this->openai = $openai;
+    $this->deprecationAnalyzer = $deprecation_analyzer;
   }
 
   /**
@@ -144,7 +156,10 @@ class ProjectAnalyzer {
     if ($config->get('scan_custom_modules')) {
       foreach ($project_info['custom_modules'] as $name => $info) {
         $module_path = $this->moduleHandler->getModule($name)->getPath();
-        $this->analyzeCustomModule($name, $module_path, $recommendations);
+        $results = $this->analyzeCustomModule($name, $module_path);
+        if (!empty($results['recommendations'])) {
+          $recommendations = array_merge($recommendations, $results['recommendations']);
+        }
       }
     }
 
@@ -173,49 +188,89 @@ class ProjectAnalyzer {
   }
 
   /**
-   * Analyzes a custom module using OpenAI.
+   * Analyzes a custom module for upgrade compatibility.
    *
-   * @param string $name
+   * @param string $module
    *   The module name.
-   * @param string $path
+   * @param string $module_path
    *   The module path.
-   * @param array &$recommendations
-   *   Array of recommendations to append to.
+   *
+   * @return array
+   *   Analysis results.
    */
-  protected function analyzeCustomModule($name, $path, array &$recommendations) {
-    $files = $this->findPhpFiles($path);
-    $context = [
-      'type' => 'module',
-      'module_name' => $name,
-      'drupal_version' => \Drupal::VERSION,
-      'target_version' => '10.0.0',
+  public function analyzeCustomModule($module, $module_path) {
+    $results = [
+      'module' => $module,
+      'files' => [],
+      'errors' => [],
+      'warnings' => [],
+      'recommendations' => [],
     ];
 
-    foreach ($files as $file) {
-      $code = file_get_contents($file);
-      $context['file_path'] = str_replace(DRUPAL_ROOT . '/', '', $file);
+    try {
+      // First, get deprecation analysis from Upgrade Status
+      $deprecation_results = $this->deprecationAnalyzer->analyze($module_path);
       
-      $analysis = $this->analyzeCode($code, $context);
-      
-      if (!empty($analysis['issues'])) {
-        foreach ($analysis['issues'] as $issue) {
-          $recommendations[] = [
-            'type' => $issue['type'],
-            'priority' => $issue['priority'],
-            'message' => t('@description in @file', [
-              '@description' => $issue['description'],
-              '@file' => $context['file_path'],
-            ]),
-            'actions' => [
-              [
-                'label' => t('View file'),
-                'url' => "admin/config/development/upgrade-assistant/file/" . urlencode($context['file_path']),
-              ],
-            ],
-            'code_example' => $issue['code_example'] ?? NULL,
+      // Process deprecation results
+      foreach ($deprecation_results as $file => $issues) {
+        $file_results = [
+          'path' => $file,
+          'issues' => [],
+        ];
+
+        foreach ($issues as $issue) {
+          $file_results['issues'][] = [
+            'line' => $issue['line'],
+            'message' => $issue['message'],
+            'severity' => $issue['severity'],
           ];
         }
+
+        $results['files'][$file] = $file_results;
       }
+
+      // For each file with issues, get AI recommendations
+      foreach ($results['files'] as $file => $file_results) {
+        if (!empty($file_results['issues'])) {
+          $file_path = $module_path . '/' . $file;
+          if (file_exists($file_path)) {
+            $code = file_get_contents($file_path);
+            
+            // Prepare context for AI analysis
+            $context = [
+              'module' => $module,
+              'file' => $file,
+              'issues' => $file_results['issues'],
+              'drupal_version' => \Drupal::VERSION,
+            ];
+
+            // Get AI recommendations
+            $ai_analysis = $this->openai->analyzeCode($code, $context);
+            if ($ai_analysis) {
+              $results['files'][$file]['ai_recommendations'] = $ai_analysis;
+              
+              // Add overall recommendations
+              if (!empty($ai_analysis['recommendations'])) {
+                $results['recommendations'] = array_merge(
+                  $results['recommendations'],
+                  $ai_analysis['recommendations']
+                );
+              }
+            }
+          }
+        }
+      }
+
+      return $results;
+    }
+    catch (\Exception $e) {
+      \Drupal::logger('ai_upgrade_assistant')->error('Error analyzing module @module: @error', [
+        '@module' => $module,
+        '@error' => $e->getMessage(),
+      ]);
+      
+      $results['errors'][] = $e->getMessage();
+      return $results;
     }
   }
 
