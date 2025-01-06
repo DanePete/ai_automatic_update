@@ -1,0 +1,53 @@
+{#
+/**
+ * @file
+ * Default theme implementation for code diff view.
+ *
+ * Available variables:
+ * - file_path: Path to the file being analyzed.
+ * - analysis: Analysis results for the file.
+ */
+#}
+
+<div class="code-diff-view">
+  <div class="diff-file">
+    <div class="diff-file-header">
+      <span class="file-path">{{ file_path }}</span>
+    </div>
+    <div class="diff-file-content">
+      {% if analysis.issues is empty %}
+        <div class="no-changes">
+          {{ 'No changes required for this file.'|t }}
+        </div>
+      {% else %}
+        {% for issue in analysis.issues %}
+          <div class="issue-section">
+            <div class="issue-header">
+              <span class="issue-type priority-{{ issue.priority }}">{{ issue.type|replace({'_': ' '})|title }}</span>
+              <span class="issue-description">{{ issue.description }}</span>
+            </div>
+            
+            {% if issue.code_example %}
+              <div class="code-changes">
+                <div class="current-code">
+                  <h4>{{ 'Current Code'|t }}</h4>
+                  <pre><code class="php">{{ issue.current_code }}</code></pre>
+                </div>
+                <div class="suggested-code">
+                  <h4>{{ 'Suggested Changes'|t }}</h4>
+                  <pre><code class="php">{{ issue.code_example }}</code></pre>
+                </div>
+              </div>
+              
+              <div class="change-actions">
+                <button class="button button--primary apply-changes" data-file-path="{{ file_path }}">
+                  {{ 'Apply Changes'|t }}
+                </button>
+              </div>
+            {% endif %}
+          </div>
+        {% endfor %}
+      {% endif %}
+    </div>
+  </div>
+</div>

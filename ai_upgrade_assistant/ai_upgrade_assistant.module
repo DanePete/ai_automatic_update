@@ -1,0 +1,37 @@
+<?php
+
+/**
+ * @file
+ * Contains ai_upgrade_assistant.module.
+ */
+
+use Drupal\Core\Routing\RouteMatchInterface;
+
+/**
+ * Implements hook_help().
+ */
+function ai_upgrade_assistant_help($route_name, RouteMatchInterface $route_match) {
+  switch ($route_name) {
+    case 'help.page.ai_upgrade_assistant':
+      $output = '';
+      $output .= '<h3>' . t('About') . '</h3>';
+      $output .= '<p>' . t('AI-powered assistant for Drupal upgrades and maintenance.') . '</p>';
+      return $output;
+  }
+}
+
+/**
+ * Implements hook_theme().
+ */
+function ai_upgrade_assistant_theme() {
+  return [
+    'upgrade_dashboard' => [
+      'variables' => [
+        'project_info' => NULL,
+        'recommendations' => NULL,
+        'terminal_output' => NULL,
+      ],
+      'template' => 'upgrade-dashboard',
+    ],
+  ];
+}

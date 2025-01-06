@@ -1,0 +1,9 @@
+name: AI Upgrade Assistant
+type: module
+description: 'AI-powered assistant for Drupal upgrades and maintenance.'
+package: Custom
+core_version_requirement: ^9 || ^10
+configure: ai_upgrade_assistant.settings
+dependencies:
+  - drupal:system
+  - drupal:user

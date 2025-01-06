@@ -1,0 +1,269 @@
+{#
+/**
+ * @file
+ * Default theme implementation for analysis report.
+ *
+ * Available variables:
+ * - data: The report data.
+ * - base_path: The base path of the site.
+ */
+#}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Drupal Upgrade Analysis Report</title>
+  <style>
+    :root {
+      --color-primary: #0678be;
+      --color-secondary: #53b0eb;
+      --color-success: #325e1c;
+      --color-warning: #734c00;
+      --color-error: #a51b00;
+      --color-text: #222330;
+      --color-text-light: #545560;
+      --color-border: #d4d4d8;
+      --color-bg: #ffffff;
+      --color-bg-light: #f3f4f9;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+      line-height: 1.5;
+      color: var(--color-text);
+      margin: 0;
+      padding: 2rem;
+      background: var(--color-bg-light);
+    }
+
+    .report-container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: var(--color-bg);
+      padding: 2rem;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    h1, h2, h3 {
+      color: var(--color-primary);
+      margin-top: 2rem;
+      margin-bottom: 1rem;
+    }
+
+    h1 {
+      font-size: 2rem;
+      text-align: center;
+      border-bottom: 2px solid var(--color-primary);
+      padding-bottom: 1rem;
+    }
+
+    .meta-info {
+      display: flex;
+      justify-content: space-between;
+      color: var(--color-text-light);
+      margin-bottom: 2rem;
+      padding: 1rem;
+      background: var(--color-bg-light);
+      border-radius: 4px;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+
+    .summary-card {
+      background: var(--color-bg);
+      padding: 1rem;
+      border-radius: 4px;
+      border: 1px solid var(--color-border);
+      text-align: center;
+    }
+
+    .summary-card h3 {
+      margin: 0;
+      color: var(--color-text-light);
+      font-size: 1rem;
+    }
+
+    .summary-card .value {
+      font-size: 2rem;
+      font-weight: bold;
+      color: var(--color-primary);
+    }
+
+    .module-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+
+    .module-card {
+      background: var(--color-bg);
+      padding: 1rem;
+      border-radius: 4px;
+      border: 1px solid var(--color-border);
+    }
+
+    .module-card h3 {
+      margin-top: 0;
+      border-bottom: 1px solid var(--color-border);
+      padding-bottom: 0.5rem;
+    }
+
+    .issue-list {
+      margin-bottom: 2rem;
+    }
+
+    .issue-card {
+      background: var(--color-bg);
+      padding: 1rem;
+      border-radius: 4px;
+      border: 1px solid var(--color-border);
+      margin-bottom: 1rem;
+    }
+
+    .issue-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+
+    .issue-type {
+      display: inline-block;
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.875rem;
+      font-weight: 500;
+    }
+
+    .priority-critical {
+      background: #fef2f2;
+      color: var(--color-error);
+    }
+
+    .priority-warning {
+      background: #fffbeb;
+      color: var(--color-warning);
+    }
+
+    .priority-suggestion {
+      background: #f0fdf4;
+      color: var(--color-success);
+    }
+
+    .code-block {
+      background: #1e1e1e;
+      color: #d4d4d4;
+      padding: 1rem;
+      border-radius: 4px;
+      overflow-x: auto;
+      font-family: 'Fira Code', 'Consolas', monospace;
+    }
+
+    .file-path {
+      font-family: 'Fira Code', 'Consolas', monospace;
+      color: var(--color-text-light);
+      font-size: 0.875rem;
+    }
+
+    @media (max-width: 768px) {
+      body {
+        padding: 1rem;
+      }
+      
+      .report-container {
+        padding: 1rem;
+      }
+      
+      .summary-grid {
+        grid-template-columns: 1fr;
+      }
+      
+      .module-list {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="report-container">
+    <h1>Drupal Upgrade Analysis Report</h1>
+    
+    <div class="meta-info">
+      <div>Generated on: {{ data.timestamp }}</div>
+      <div>Drupal Version: {{ data.drupal_version }}</div>
+    </div>
+
+    <h2>Summary</h2>
+    <div class="summary-grid">
+      <div class="summary-card">
+        <h3>Total Files</h3>
+        <div class="value">{{ data.summary.total_files }}</div>
+      </div>
+      <div class="summary-card">
+        <h3>Total Issues</h3>
+        <div class="value">{{ data.summary.issues_found }}</div>
+      </div>
+      <div class="summary-card">
+        <h3>Critical Issues</h3>
+        <div class="value">{{ data.summary.critical_issues }}</div>
+      </div>
+      <div class="summary-card">
+        <h3>Warnings</h3>
+        <div class="value">{{ data.summary.warnings }}</div>
+      </div>
+      <div class="summary-card">
+        <h3>Suggestions</h3>
+        <div class="value">{{ data.summary.suggestions }}</div>
+      </div>
+    </div>
+
+    <h2>Module Analysis</h2>
+    <div class="module-list">
+      {% for module in data.modules %}
+        <div class="module-card">
+          <h3>{{ module.name }}</h3>
+          <div>Total Issues: {{ module.issues }}</div>
+          <div>Critical: {{ module.critical }}</div>
+          <div>Warnings: {{ module.warnings }}</div>
+          <div>Suggestions: {{ module.suggestions }}</div>
+        </div>
+      {% endfor %}
+    </div>
+
+    <h2>Detailed Analysis</h2>
+    <div class="issue-list">
+      {% for file_path, file in data.files %}
+        {% if file.issues is not empty %}
+          <h3>
+            <span class="file-path">{{ file_path }}</span>
+          </h3>
+          {% for issue in file.issues %}
+            <div class="issue-card">
+              <div class="issue-header">
+                <span class="issue-type priority-{{ issue.priority }}">
+                  {{ issue.type|replace({'_': ' '})|title }}
+                </span>
+                <span class="priority">{{ issue.priority|title }}</span>
+              </div>
+              <p>{{ issue.description }}</p>
+              {% if issue.code_example %}
+                <div class="code-block">
+                  <pre><code>{{ issue.code_example }}</code></pre>
+                </div>
+              {% endif %}
+            </div>
+          {% endfor %}
+        {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+</body>
+</html>
