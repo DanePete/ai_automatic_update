@@ -250,4 +250,229 @@ class ReportController extends ControllerBase {
       $this->messenger()->addError($this->t('An error occurred during analysis.'));
     }
   }
+
+  /**
+   * Generates a comprehensive upgrade report.
+   *
+   * @return array
+   *   A render array for the report page.
+   */
+  public function generateReport() {
+    $build = [
+      '#type' => 'container',
+      '#attributes' => ['class' => ['upgrade-report']],
+      'title' => [
+        '#markup' => '<h2>' . $this->t('Upgrade Readiness Report') . '</h2>',
+      ],
+    ];
+
+    // Get all analysis results
+    $results = \Drupal::state()->get('ai_upgrade_assistant.analysis_results', []);
+    $scan_results = \Drupal::service('upgrade_status.results')->getResults();
+
+    // Summary section
+    $total_modules = count($scan_results);
+    $analyzed_modules = count(array_filter($scan_results, function ($project) {
+      return !empty($project['data']);
+    }));
+    $ai_analyzed = count($results);
+
+    $build['summary'] = [
+      '#type' => 'container',
+      '#attributes' => ['class' => ['report-summary']],
+      'content' => [
+        '#theme' => 'item_list',
+        '#items' => [
+          $this->t('Total Modules: @total', ['@total' => $total_modules]),
+          $this->t('Modules Scanned: @scanned', ['@scanned' => $analyzed_modules]),
+          $this->t('Modules with AI Analysis: @ai', ['@ai' => $ai_analyzed]),
+        ],
+      ],
+    ];
+
+    // Compatibility overview
+    $compatibility = [
+      'compatible' => 0,
+      'needs_update' => 0,
+      'incompatible' => 0,
+    ];
+
+    $issues_by_type = [];
+    foreach ($scan_results as $module => $project) {
+      if (empty($project['data'])) {
+        continue;
+      }
+
+      $errors = $project['data']['totals']['errors'] ?? 0;
+      $warnings = $project['data']['totals']['warnings'] ?? 0;
+
+      if ($errors === 0 && $warnings === 0) {
+        $compatibility['compatible']++;
+      }
+      elseif ($errors === 0) {
+        $compatibility['needs_update']++;
+      }
+      else {
+        $compatibility['incompatible']++;
+      }
+
+      // Collect issues by type
+      foreach ($project['data']['files'] ?? [] as $file) {
+        foreach ($file as $issue) {
+          $type = $issue['type'] ?? 'unknown';
+          if (!isset($issues_by_type[$type])) {
+            $issues_by_type[$type] = 0;
+          }
+          $issues_by_type[$type]++;
+        }
+      }
+    }
+
+    // Add compatibility chart
+    $build['compatibility'] = [
+      '#type' => 'container',
+      '#attributes' => ['class' => ['compatibility-overview']],
+      'title' => [
+        '#markup' => '<h3>' . $this->t('Compatibility Overview') . '</h3>',
+      ],
+      'chart' => [
+        '#theme' => 'item_list',
+        '#items' => [
+          $this->t('Compatible: @count', ['@count' => $compatibility['compatible']]),
+          $this->t('Needs Update: @count', ['@count' => $compatibility['needs_update']]),
+          $this->t('Incompatible: @count', ['@count' => $compatibility['incompatible']]),
+        ],
+      ],
+    ];
+
+    // Issues breakdown
+    if (!empty($issues_by_type)) {
+      $build['issues'] = [
+        '#type' => 'container',
+        '#attributes' => ['class' => ['issues-breakdown']],
+        'title' => [
+          '#markup' => '<h3>' . $this->t('Issues by Type') . '</h3>',
+        ],
+        'list' => [
+          '#theme' => 'item_list',
+          '#items' => [],
+        ],
+      ];
+
+      foreach ($issues_by_type as $type => $count) {
+        $build['issues']['list']['#items'][] = $this->t('@type: @count', [
+          '@type' => ucfirst(str_replace('_', ' ', $type)),
+          '@count' => $count,
+        ]);
+      }
+    }
+
+    // Module-specific analysis
+    $headers = [
+      $this->t('Module'),
+      $this->t('Status'),
+      $this->t('Issues'),
+      $this->t('AI Recommendations'),
+      $this->t('Actions'),
+    ];
+
+    $rows = [];
+    foreach ($scan_results as $module => $project) {
+      if (empty($project['data'])) {
+        continue;
+      }
+
+      $errors = $project['data']['totals']['errors'] ?? 0;
+      $warnings = $project['data']['totals']['warnings'] ?? 0;
+      $ai_recommendations = count($results[$module]['files'] ?? []);
+
+      $status = $this->getModuleStatus($errors, $warnings);
+      
+      $rows[] = [
+        $module,
+        $status,
+        $this->t('@errors errors, @warnings warnings', [
+          '@errors' => $errors,
+          '@warnings' => $warnings,
+        ]),
+        $ai_recommendations ? $this->t('@count recommendations', ['@count' => $ai_recommendations]) : $this->t('No analysis'),
+        [
+          'data' => [
+            '#type' => 'operations',
+            '#links' => [
+              'details' => [
+                'title' => $this->t('View Details'),
+                'url' => Url::fromRoute('ai_upgrade_assistant.module_details', ['module' => $module]),
+              ],
+              'analyze' => [
+                'title' => $this->t('AI Analysis'),
+                'url' => Url::fromRoute('ai_upgrade_assistant.analyze_module', ['module' => $module]),
+              ],
+            ],
+          ],
+        ],
+      ];
+    }
+
+    $build['modules'] = [
+      '#type' => 'table',
+      '#header' => $headers,
+      '#rows' => $rows,
+      '#empty' => $this->t('No modules have been analyzed.'),
+    ];
+
+    // Export button
+    $build['actions'] = [
+      '#type' => 'container',
+      '#attributes' => ['class' => ['report-actions']],
+      'export' => [
+        '#type' => 'link',
+        '#title' => $this->t('Export Report'),
+        '#url' => Url::fromRoute('ai_upgrade_assistant.export_report'),
+        '#attributes' => [
+          'class' => ['button', 'button--primary'],
+        ],
+      ],
+    ];
+
+    return $build;
+  }
+
+  /**
+   * Gets a formatted module status.
+   *
+   * @param int $errors
+   *   Number of errors.
+   * @param int $warnings
+   *   Number of warnings.
+   *
+   * @return array
+   *   A render array for the status.
+   */
+  protected function getModuleStatus($errors, $warnings) {
+    if ($errors === 0 && $warnings === 0) {
+      return [
+        '#type' => 'html_tag',
+        '#tag' => 'span',
+        '#value' => $this->t('Compatible'),
+        '#attributes' => ['class' => ['status-compatible']],
+      ];
+    }
+    elseif ($errors === 0) {
+      return [
+        '#type' => 'html_tag',
+        '#tag' => 'span',
+        '#value' => $this->t('Needs Update'),
+        '#attributes' => ['class' => ['status-needs-update']],
+      ];
+    }
+    else {
+      return [
+        '#type' => 'html_tag',
+        '#tag' => 'span',
+        '#value' => $this->t('Incompatible'),
+        '#attributes' => ['class' => ['status-incompatible']],
+      ];
+    }
+  }
 }

@@ -13,3 +13,51 @@ ai_upgrade_assistant.check_status:
     _title: 'Check Status'
   requirements:
     _permission: 'access upgrade status'
+
+ai_upgrade_assistant.start_analysis:
+  path: '/admin/reports/upgrade-assistant/start'
+  defaults:
+    _controller: '\Drupal\ai_upgrade_assistant\Controller\AnalysisController::startAnalysis'
+    _title: 'Start Analysis'
+  requirements:
+    _permission: 'access upgrade status'
+
+ai_upgrade_assistant.analyze_module:
+  path: '/admin/reports/upgrade-assistant/analyze/{module}'
+  defaults:
+    _controller: '\Drupal\ai_upgrade_assistant\Controller\AnalysisController::analyzeModule'
+    _title: 'Analyze Module'
+  requirements:
+    _permission: 'access upgrade status'
+
+ai_upgrade_assistant.module_details:
+  path: '/admin/reports/upgrade-assistant/module/{module}'
+  defaults:
+    _controller: '\Drupal\ai_upgrade_assistant\Controller\AnalysisController::moduleDetails'
+    _title: 'Module Details'
+  requirements:
+    _permission: 'access upgrade status'
+
+ai_upgrade_assistant.module_patches:
+  path: '/admin/reports/upgrade-assistant/module/{module}/patches'
+  defaults:
+    _controller: '\Drupal\ai_upgrade_assistant\Controller\PatchController::modulePatchList'
+    _title: 'Module Patches'
+  requirements:
+    _permission: 'access upgrade status'
+
+ai_upgrade_assistant.generate_report:
+  path: '/admin/reports/upgrade-assistant/report'
+  defaults:
+    _controller: '\Drupal\ai_upgrade_assistant\Controller\ReportController::generateReport'
+    _title: 'Generate Report'
+  requirements:
+    _permission: 'access upgrade status'
+
+ai_upgrade_assistant.settings:
+  path: '/admin/config/development/ai-upgrade-assistant'
+  defaults:
+    _form: '\Drupal\ai_upgrade_assistant\Form\SettingsForm'
+    _title: 'AI Upgrade Assistant Settings'
+  requirements:
+    _permission: 'administer site configuration'

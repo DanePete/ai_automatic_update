@@ -1,4 +1,17 @@
 services:
+  ai_upgrade_assistant.openai:
+    class: Drupal\ai_upgrade_assistant\Service\OpenAIService
+    arguments:
+      - '@config.factory'
+      - '@http_client'
+      - '@logger.factory'
+
+  ai_upgrade_assistant.analysis_tracker:
+    class: Drupal\ai_upgrade_assistant\Service\AnalysisTracker
+    arguments:
+      - '@state'
+      - '@config.factory'
+
   ai_upgrade_assistant.project_analyzer:
     class: Drupal\ai_upgrade_assistant\Service\ProjectAnalyzer
     arguments:
@@ -8,13 +21,6 @@ services:
       - '@ai_upgrade_assistant.openai'
       - '@upgrade_status.deprecation_analyzer'
 
-  ai_upgrade_assistant.openai:
-    class: Drupal\ai_upgrade_assistant\Service\OpenAIService
-    arguments:
-      - '@http_client'
-      - '@config.factory'
-      - '@logger.factory'
-
   ai_upgrade_assistant.batch_analyzer:
     class: Drupal\ai_upgrade_assistant\Service\BatchAnalyzer
     arguments:
@@ -23,12 +29,8 @@ services:
       - '@string_translation'
       - '@module_handler'
       - '@ai_upgrade_assistant.analysis_tracker'
-
-  ai_upgrade_assistant.analysis_tracker:
-    class: Drupal\ai_upgrade_assistant\Service\AnalysisTracker
-    arguments:
-      - '@state'
-      - '@config.factory'
+    calls:
+      - [setStringTranslation, ['@string_translation']]
 
   ai_upgrade_assistant.patch_generator:
     class: Drupal\ai_upgrade_assistant\Service\PatchGenerator
@@ -37,6 +39,10 @@ services:
       - '@config.factory'
       - '@logger.factory'
 
-  ai_upgrade_assistant.report_generator:
-    class: Drupal\ai_upgrade_assistant\Service\ReportGenerator
-    arguments: ['@file_system', '@config.factory', '@logger.factory', '@date.formatter', '@module_handler']
+  ai_upgrade_assistant.rollback_manager:
+    class: Drupal\ai_upgrade_assistant\Service\RollbackManager
+    arguments:
+      - '@file_system'
+      - '@state'
+      - '@logger.factory'
+      - '@config.factory'

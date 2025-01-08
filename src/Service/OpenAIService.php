@@ -8,7 +8,7 @@ use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
 
 /**
- * Service for interacting with OpenAI API.
+ * Service for interacting with OpenAI API for code analysis.
  */
 class OpenAIService {
 
@@ -41,7 +41,7 @@ class OpenAIService {
   protected $testMode = FALSE;
 
   /**
-   * Maximum number of retries for rate limit errors.
+   * Maximum retries for API calls.
    *
    * @var int
    */
@@ -52,7 +52,7 @@ class OpenAIService {
    *
    * @var int
    */
-  protected $baseDelay = 7;
+  protected $baseRetryDelay = 2;
 
   /**
    * Constructs a new OpenAIService object.
@@ -75,61 +75,62 @@ class OpenAIService {
   }
 
   /**
-   * Set test mode.
+   * Analyzes code for upgrade compatibility.
    *
-   * @param bool $enabled
-   *   Whether test mode should be enabled.
+   * @param string $code
+   *   The code to analyze.
+   * @param array $context
+   *   Additional context about the code.
+   *
+   * @return array|null
+   *   Analysis results or NULL if analysis is not possible.
+   *
+   * @throws \Exception
+   *   If there is an error communicating with OpenAI.
    */
-  public function setTestMode($enabled = TRUE) {
-    $this->testMode = $enabled;
-  }
+  public function analyzeCode($code, array $context = []) {
+    $logger = $this->loggerFactory->get('ai_upgrade_assistant');
+    
+    // Return mock results in test mode
+    if ($this->testMode) {
+      $logger->info('Running in test mode, returning mock results');
+      return $this->getMockAnalysisResults();
+    }
 
-  /**
-   * Validates the API key format.
-   *
-   * @param string $api_key
-   *   The API key to validate.
-   *
-   * @return bool
-   *   TRUE if the key format is valid, FALSE otherwise.
-   */
-  protected function isValidApiKeyFormat($api_key) {
-    // Accept both standard and project API key formats
-    return (bool) preg_match('/^(sk-|sk-proj-)[\w-]+$/', trim($api_key));
-  }
+    $config = $this->configFactory->get('ai_upgrade_assistant.settings');
+    $api_key = $config->get('openai_api_key');
 
-  /**
-   * Gets mock analysis results for test mode.
-   *
-   * @return array
-   *   Mock analysis results.
-   */
-  protected function getMockAnalysisResults() {
-    return [
-      'issues' => [
-        [
-          'type' => 'deprecation',
-          'description' => 'Using deprecated function drupal_get_path()',
-          'priority' => 'high',
-          'current_code' => 'drupal_get_path("module", "example")',
-          'code_example' => '\Drupal::service("extension.list.module")->getPath("example")',
-          'line_number' => 42,
+    if (empty($api_key) || !$this->isValidApiKeyFormat($api_key)) {
+      $logger->error('Invalid or missing OpenAI API key');
+      return NULL;
+    }
+
+    $prompt = $this->prepareCodeAnalysisPrompt($code, $context);
+    
+    try {
+      $payload = [
+        'model' => 'gpt-4',
+        'messages' => [
+          [
+            'role' => 'system',
+            'content' => $this->getSystemPrompt(),
+          ],
+          [
+            'role' => 'user',
+            'content' => $prompt,
+          ],
         ],
-        [
-          'type' => 'best_practice',
-          'description' => 'Direct service container usage detected',
-          'priority' => 'medium',
-          'current_code' => '\Drupal::service("example")',
-          'code_example' => 'Use dependency injection instead',
-          'line_number' => 86,
-        ],
-      ],
-      'warnings' => [
-        'Consider using strict typing',
-        'Add return type hints',
-      ],
-      'summary' => 'Code analysis completed with 2 issues found.',
-    ];
+        'temperature' => 0.2,
+        'max_tokens' => 2000,
+      ];
+
+      $response = $this->makeApiCallWithRetry($payload, $api_key);
+      return $this->parseAnalysisResponse($response);
+    }
+    catch (\Exception $e) {
+      $logger->error('Error analyzing code: @message', ['@message' => $e->getMessage()]);
+      throw $e;
+    }
   }
 
   /**
@@ -158,157 +159,24 @@ class OpenAIService {
           'Content-Type' => 'application/json',
         ],
         'json' => $payload,
-        'timeout' => 30,
-        'connect_timeout' => 10,
-        'http_errors' => false,
-        'verify' => true,
       ]);
 
-      $status_code = $response->getStatusCode();
-      $body = (string) $response->getBody();
-      $result = json_decode($body, TRUE);
-
-      // Handle rate limit error
-      if ($status_code === 429 && $attempt <= $this->maxRetries) {
-        $error = $result['error'] ?? [];
-        $wait_time = 0;
-
-        // Parse wait time from error message
-        if (!empty($error['message'])) {
-          if (preg_match('/Please try again in ([\d.]+)s/', $error['message'], $matches)) {
-            $wait_time = ceil((float) $matches[1]);
-          }
-        }
-
-        // Use exponential backoff if no wait time provided
-        if (!$wait_time) {
-          $wait_time = $this->baseDelay * pow(2, $attempt - 1);
-        }
-
-        $logger->warning('Rate limit hit, attempt @attempt of @max. Waiting @seconds seconds...', [
+      return json_decode((string) $response->getBody(), TRUE);
+    }
+    catch (GuzzleException $e) {
+      // Handle rate limits with exponential backoff
+      if ($e->getCode() === 429 && $attempt < $this->maxRetries) {
+        $delay = $this->baseRetryDelay * pow(2, $attempt - 1);
+        $logger->warning('Rate limited, retrying in @seconds seconds (attempt @attempt)', [
+          '@seconds' => $delay,
           '@attempt' => $attempt,
-          '@max' => $this->maxRetries,
-          '@seconds' => $wait_time,
         ]);
-
-        // Wait before retry
-        sleep($wait_time);
-
-        // Retry the request
+        
+        sleep($delay);
         return $this->makeApiCallWithRetry($payload, $api_key, $attempt + 1);
       }
-
-      // Handle other errors
-      if ($status_code !== 200) {
-        throw new \Exception("OpenAI API returned status code: $status_code with body: $body");
-      }
-
-      return $result;
-    }
-    catch (\Exception $e) {
-      if ($e->getCode() === 429 && $attempt <= $this->maxRetries) {
-        // Wait using exponential backoff
-        $wait_time = $this->baseDelay * pow(2, $attempt - 1);
-        sleep($wait_time);
-        return $this->makeApiCallWithRetry($payload, $api_key, $attempt + 1);
-      }
-      throw $e;
-    }
-  }
-
-  /**
-   * Analyzes code for upgrade compatibility.
-   *
-   * @param string $code
-   *   The code to analyze.
-   * @param array $context
-   *   Additional context about the code.
-   *
-   * @return array|null
-   *   Analysis results or NULL if analysis is not possible.
-   *
-   * @throws \Exception
-   *   If there is an error communicating with OpenAI.
-   */
-  public function analyzeCode($code, array $context = []) {
-    $logger = $this->loggerFactory->get('ai_upgrade_assistant');
-    
-    // Return mock results in test mode
-    if ($this->testMode) {
-      $logger->info('Running in test mode, returning mock results');
-      return $this->getMockAnalysisResults();
-    }
-
-    $config = $this->configFactory->get('ai_upgrade_assistant.settings');
-    $api_key = $config->get('openai_api_key');
-    $model = $config->get('model') ?: 'gpt-4';
-
-    // Log key details (safely)
-    $logger->debug('API key format check: Key starts with: @start, length: @length', [
-      '@start' => substr($api_key, 0, 8),
-      '@length' => strlen($api_key),
-    ]);
-
-    // Check if OpenAI integration is configured
-    if (empty($api_key)) {
-      $logger->warning('OpenAI API key is not configured.');
-      return NULL;
-    }
-
-    try {
-      $logger->debug('Preparing OpenAI API request with model: @model', [
-        '@model' => $model,
-      ]);
-
-      // Prepare request payload
-      $payload = [
-        'model' => $model,
-        'messages' => [
-          [
-            'role' => 'system',
-            'content' => $this->getSystemPrompt(),
-          ],
-          [
-            'role' => 'user',
-            'content' => $this->prepareCodeAnalysisPrompt($code, $context),
-          ],
-        ],
-        'temperature' => 0.2,
-        'max_tokens' => 2000,
-      ];
-
-      $logger->debug('Request payload prepared: @payload', [
-        '@payload' => json_encode($payload),
-      ]);
-
-      $result = $this->makeApiCallWithRetry($payload, $api_key);
       
-      if (empty($result['choices'][0]['message']['content'])) {
-        $logger->error('Invalid response structure: @response', [
-          '@response' => json_encode($result),
-        ]);
-        throw new \Exception('Invalid response structure from OpenAI API');
-      }
-
-      return $this->parseAnalysisResponse($result['choices'][0]['message']['content']);
-    }
-    catch (\Exception $e) {
-      $error_message = $e->getMessage();
-      
-      // Log detailed error information
-      $logger->error('OpenAI API error: @message', [
-        '@message' => $error_message,
-      ]);
-
-      // Try fallback if configured
-      if ($config->get('fallback_to_mock')) {
-        $logger->notice('API error occurred, falling back to mock results: @error', [
-          '@error' => $error_message,
-        ]);
-        return $this->getMockAnalysisResults();
-      }
-      
-      throw new \Exception($error_message);
+      throw new \Exception('OpenAI API request failed: ' . $e->getMessage(), $e->getCode(), $e);
     }
   }
 
@@ -319,39 +187,15 @@ class OpenAIService {
    *   The system prompt.
    */
   protected function getSystemPrompt() {
-    return <<<EOT
-You are an expert Drupal developer analyzing code for compatibility issues and improvements.
-Focus on:
-1. Deprecated function usage
-2. API changes between versions
-3. Coding standards compliance
-4. Security best practices
-5. Performance optimizations
-
-For each issue found, provide:
-1. Issue type (deprecation, security, performance, standards)
-2. Description of the problem
-3. Priority (high, medium, low)
-4. Current problematic code
-5. Example of the correct code
-6. Line number if available
-
-Format your response as JSON with the following structure:
-{
-  "issues": [
-    {
-      "type": "string",
-      "description": "string",
-      "priority": "string",
-      "current_code": "string",
-      "code_example": "string",
-      "line_number": number
-    }
-  ],
-  "warnings": ["string"],
-  "summary": "string"
-}
-EOT;
+    return "You are an expert Drupal developer specializing in code analysis and upgrades. " .
+           "Your task is to analyze code and provide detailed, actionable recommendations " .
+           "for upgrading and improving Drupal codebases. Focus on:\n\n" .
+           "1. Deprecated code and APIs\n" .
+           "2. Security best practices\n" .
+           "3. Performance optimizations\n" .
+           "4. Drupal coding standards\n" .
+           "5. Compatibility issues\n\n" .
+           "Provide specific, practical recommendations that can be implemented by developers.";
   }
 
   /**
@@ -366,59 +210,133 @@ EOT;
    *   The prepared prompt.
    */
   protected function prepareCodeAnalysisPrompt($code, array $context = []) {
-    $prompt = "Please analyze the following Drupal code:\n\n";
-    
-    if (!empty($context['file_path'])) {
-      $prompt .= "File: {$context['file_path']}\n";
+    $type = $context['type'] ?? 'general';
+    $prompt = '';
+
+    switch ($type) {
+      case 'command_analysis':
+        $prompt = "Analyze this Drupal command output for upgrade-related issues:\n\n$code";
+        break;
+
+      case 'deprecation':
+        $prompt = "Identify deprecated code and suggest modern alternatives in this Drupal code:\n\n$code";
+        break;
+
+      case 'security':
+        $prompt = "Review this Drupal code for security issues and best practices:\n\n$code";
+        break;
+
+      case 'performance':
+        $prompt = "Analyze this Drupal code for performance optimizations:\n\n$code";
+        break;
+
+      default:
+        $prompt = "Analyze this Drupal code for upgrade compatibility, security, and best practices:\n\n$code";
     }
-    if (!empty($context['module'])) {
-      $prompt .= "Module: {$context['module']}\n";
-    }
+
     if (!empty($context['drupal_version'])) {
-      $prompt .= "Drupal Version: {$context['drupal_version']}\n";
+      $prompt .= "\n\nTarget Drupal version: {$context['drupal_version']}";
     }
-    
-    $prompt .= "\nCode:\n{$code}\n\n";
-    $prompt .= "Please identify any compatibility issues, deprecated code, or areas for improvement.";
-    
+
     return $prompt;
   }
 
   /**
    * Parses the analysis response from OpenAI.
    *
-   * @param string $response
+   * @param array $response
    *   The response from OpenAI.
    *
    * @return array
    *   Parsed analysis results.
    */
   protected function parseAnalysisResponse($response) {
-    try {
-      $data = json_decode($response, TRUE);
-      
-      if (json_last_error() !== JSON_ERROR_NONE) {
-        throw new \Exception('Invalid JSON response');
-      }
-      
-      // Ensure required fields exist
-      $data['issues'] = $data['issues'] ?? [];
-      $data['warnings'] = $data['warnings'] ?? [];
-      $data['summary'] = $data['summary'] ?? 'Analysis completed.';
-      
-      return $data;
+    if (empty($response['choices'][0]['message']['content'])) {
+      throw new \Exception('Invalid response format from OpenAI');
     }
-    catch (\Exception $e) {
-      $this->loggerFactory->get('ai_upgrade_assistant')
-        ->error('Error parsing OpenAI response: @error', ['@error' => $e->getMessage()]);
-      
-      // Return a basic structure if parsing fails
-      return [
-        'issues' => [],
-        'warnings' => ['Error parsing analysis results'],
-        'summary' => 'Analysis completed with errors.',
-      ];
-    }
+
+    $content = $response['choices'][0]['message']['content'];
+    
+    // Parse the content into structured data
+    // This is a simple implementation - enhance based on actual response format
+    return [
+      'next_step' => $this->extractNextStep($content),
+      'explanation' => $this->extractExplanation($content),
+      'severity' => $this->extractSeverity($content),
+      'suggestions' => $this->extractSuggestions($content),
+    ];
   }
 
+  /**
+   * Extracts the next step from the analysis content.
+   */
+  protected function extractNextStep($content) {
+    // Implementation needed
+    return 'Continue with upgrade process';
+  }
+
+  /**
+   * Extracts the explanation from the analysis content.
+   */
+  protected function extractExplanation($content) {
+    // Implementation needed
+    return $content;
+  }
+
+  /**
+   * Extracts the severity level from the analysis content.
+   */
+  protected function extractSeverity($content) {
+    // Implementation needed
+    return 'medium';
+  }
+
+  /**
+   * Extracts specific suggestions from the analysis content.
+   */
+  protected function extractSuggestions($content) {
+    // Implementation needed
+    return [];
+  }
+
+  /**
+   * Validates the API key format.
+   *
+   * @param string $api_key
+   *   The API key to validate.
+   *
+   * @return bool
+   *   TRUE if the key format is valid, FALSE otherwise.
+   */
+  protected function isValidApiKeyFormat($api_key) {
+    return (bool) preg_match('/^sk-[a-zA-Z0-9]{32,}$/', trim($api_key));
+  }
+
+  /**
+   * Gets mock analysis results for test mode.
+   *
+   * @return array
+   *   Mock analysis results.
+   */
+  protected function getMockAnalysisResults() {
+    return [
+      'next_step' => 'Continue with upgrade process',
+      'explanation' => 'This is a mock analysis result for testing purposes.',
+      'severity' => 'low',
+      'suggestions' => [
+        'Mock suggestion 1',
+        'Mock suggestion 2',
+      ],
+    ];
+  }
+
+  /**
+   * Set test mode.
+   *
+   * @param bool $enabled
+   *   Whether test mode should be enabled.
+   */
+  public function setTestMode($enabled = TRUE) {
+    $this->testMode = $enabled;
+  }
 }

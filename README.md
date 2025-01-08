@@ -1,17 +1,22 @@
-# AI Automatic Update
+# AI Upgrade Assistant
 
-A Drupal module that uses OpenAI to analyze and automatically update your Drupal codebase.
+A Drupal module that leverages artificial intelligence to revolutionize the Drupal upgrade process, making updates and upgrades seamless across both minor and major versions.
 
-## Features
+## Status
 
-- OpenAI-powered code analysis
-- Automatic detection of deprecated code
-- Batch processing for large codebases
-- Real-time progress tracking
-- Detailed HTML/PDF reports
-- Automatic patch generation
-- Code diff viewer
-- Configurable file filters
+This module is currently in active development. See [DEVELOPMENT.md](DEVELOPMENT.md) for detailed information about the development roadmap and architecture.
+
+### Current Features
+- Basic help and theme hook integration
+- Foundation for AI-driven analysis
+- Initial dashboard structure
+- Basic reporting capabilities
+
+### Coming in 1.0
+- AI-Driven Automation
+- Enhanced User Experience
+- Chat Analyzer System
+- Comprehensive Safety and Recovery Features
 
 ## Requirements
 
@@ -57,26 +62,42 @@ drush en ai_upgrade_assistant
 
 ## Features
 
-### Code Analysis
+### AI-Powered Analysis
+- Intelligent code modification suggestions
+- Smart dependency resolution
+- Automated compatibility checking
+- Automated testing recommendations
 - Deprecated function detection
 - API changes analysis
 - Security best practices
 - Performance optimization suggestions
 - Coding standards compliance
 
-### Reporting
+### Enhanced User Experience
+- Intuitive dashboard interface
+- Real-time progress monitoring
+- Interactive upgrade workflow
+- Clear error reporting
 - HTML reports with syntax highlighting
 - PDF reports for offline viewing
 - JSON export for integration
 - Module-level statistics
 - File-level details
 
-### Patch Management
+### Safety and Recovery
+- Automated backup system
+- Rollback mechanisms
+- Database state preservation
+- Configuration management
 - Automatic patch generation
 - Safety checks before applying
 - Unified and context diff formats
 - Automatic backup creation
 - Batch processing
+
+## Development
+
+For detailed information about the module's architecture, development roadmap, and contribution guidelines, please see our [DEVELOPMENT.md](DEVELOPMENT.md) file.
 
 ## Contributing
 

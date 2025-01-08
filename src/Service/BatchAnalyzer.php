@@ -6,6 +6,9 @@ use Drupal\Core\StringTranslation\StringTranslationTrait;
 use Drupal\Core\StringTranslation\TranslationInterface;
 use Drupal\Core\State\StateInterface;
 use Drupal\Core\Extension\ModuleHandlerInterface;
+use Drupal\Core\Batch\BatchBuilder;
+use Drupal\ai_upgrade_assistant\Service\ProjectAnalyzer;
+use Drupal\ai_upgrade_assistant\Service\AnalysisTracker;
 
 /**
  * Service for handling batch analysis of code.
@@ -35,6 +38,20 @@ class BatchAnalyzer {
   protected $moduleHandler;
 
   /**
+   * The analysis tracker service.
+   *
+   * @var \Drupal\ai_upgrade_assistant\Service\AnalysisTracker
+   */
+  protected $analysisTracker;
+
+  /**
+   * Batch operation data.
+   *
+   * @var array
+   */
+  protected $batchData;
+
+  /**
    * Constructs a new BatchAnalyzer object.
    *
    * @param \Drupal\ai_upgrade_assistant\Service\ProjectAnalyzer $project_analyzer
@@ -45,304 +62,303 @@ class BatchAnalyzer {
    *   The string translation service.
    * @param \Drupal\Core\Extension\ModuleHandlerInterface $module_handler
    *   The module handler service.
+   * @param \Drupal\ai_upgrade_assistant\Service\AnalysisTracker $analysis_tracker
+   *   The analysis tracker service.
    */
   public function __construct(
     ProjectAnalyzer $project_analyzer,
     StateInterface $state,
     TranslationInterface $string_translation,
-    ModuleHandlerInterface $module_handler
+    ModuleHandlerInterface $module_handler,
+    AnalysisTracker $analysis_tracker
   ) {
     $this->projectAnalyzer = $project_analyzer;
     $this->state = $state;
-    $this->moduleHandler = $module_handler;
     $this->setStringTranslation($string_translation);
+    $this->moduleHandler = $module_handler;
+    $this->analysisTracker = $analysis_tracker;
   }
 
   /**
    * Creates a batch for analyzing the project.
    *
+   * @param array $options
+   *   Analysis options:
+   *   - modules: Array of module names to analyze.
+   *   - type: Type of analysis (e.g., 'drupal11', 'security').
+   *   - batch_size: Number of files per batch operation.
+   *
    * @return array
    *   The batch definition.
    */
-  public function createAnalysisBatch() {
-    $project_info = $this->projectAnalyzer->getProjectInfo();
-    $operations = [];
-    $config = \Drupal::config('ai_upgrade_assistant.settings');
-
-    // Add core analysis
-    $operations[] = [
-      [$this, 'analyzeDrupalCore'],
-      [$project_info['drupal_version']],
+  public function createBatch(array $options = []) {
+    $this->batchData = [
+      'current_module' => '',
+      'files_processed' => 0,
+      'total_files' => 0,
+      'errors' => [],
+      'results' => [],
     ];
 
-    // Add custom module analysis
-    if ($config->get('scan_custom_modules')) {
-      foreach ($project_info['custom_modules'] as $name => $info) {
-        $module_path = $this->moduleHandler->getModule($name)->getPath();
-        if ($module_path && is_dir($module_path)) {
-          $files = $this->projectAnalyzer->findPhpFiles($module_path);
-          foreach ($files as $file) {
-            $operations[] = [
-              [$this, 'analyzeFile'],
-              [
-                $file,
-                $name,
-                'custom_module',
-              ],
-            ];
-          }
-        }
+    // Store batch data in state for resume capability
+    $batch_id = uniqid('ai_upgrade_', TRUE);
+    $this->state->set('ai_upgrade_assistant.current_batch', $batch_id);
+    $this->state->set("ai_upgrade_assistant.batch.$batch_id", $this->batchData);
+
+    $batch_builder = new BatchBuilder();
+    $batch_builder
+      ->setTitle($this->t('Analyzing project code'))
+      ->setInitMessage($this->t('Starting code analysis...'))
+      ->setProgressMessage($this->t('Analyzed @current out of @total files.'))
+      ->setErrorMessage($this->t('Error analyzing code.'))
+      ->setFinishCallback([$this, 'batchFinished']);
+
+    // Add setup operation
+    $batch_builder->addOperation(
+      [$this, 'batchSetup'],
+      [$options, $batch_id]
+    );
+
+    // Get modules to analyze
+    $modules = $options['modules'] ?? $this->getModulesToAnalyze();
+
+    foreach ($modules as $module) {
+      $files = $this->projectAnalyzer->getModuleFiles($module);
+      $chunks = array_chunk($files, $options['batch_size'] ?? 50);
+
+      foreach ($chunks as $chunk) {
+        $batch_builder->addOperation(
+          [$this, 'batchProcessFiles'],
+          [
+            $module,
+            $chunk,
+            $options['type'] ?? 'general',
+            $batch_id,
+          ]
+        );
       }
     }
 
-    // Add contributed module analysis
-    if ($config->get('scan_contrib_modules')) {
-      foreach ($project_info['installed_modules'] as $name => $info) {
-        $operations[] = [
-          [$this, 'analyzeModule'],
-          [$name, $info],
-        ];
+    return $batch_builder->toArray();
+  }
+
+  /**
+   * Setup batch process.
+   *
+   * @param array $options
+   *   Batch options.
+   * @param string $batch_id
+   *   Unique batch ID.
+   * @param array $context
+   *   Batch context.
+   */
+  public function batchSetup(array $options, $batch_id, array &$context) {
+    $modules = $options['modules'] ?? $this->getModulesToAnalyze();
+    $total_files = 0;
+
+    foreach ($modules as $module) {
+      $files = $this->projectAnalyzer->getModuleFiles($module);
+      $total_files += count($files);
+    }
+
+    $this->batchData['total_files'] = $total_files;
+    $this->state->set("ai_upgrade_assistant.batch.$batch_id", $this->batchData);
+
+    $context['results']['batch_id'] = $batch_id;
+    $context['results']['total_files'] = $total_files;
+    $context['results']['start_time'] = time();
+  }
+
+  /**
+   * Process a batch of files.
+   *
+   * @param string $module
+   *   Module name.
+   * @param array $files
+   *   Files to process.
+   * @param string $type
+   *   Analysis type.
+   * @param string $batch_id
+   *   Unique batch ID.
+   * @param array $context
+   *   Batch context.
+   */
+  public function batchProcessFiles($module, array $files, $type, $batch_id, array &$context) {
+    if (!isset($context['sandbox']['progress'])) {
+      $context['sandbox']['progress'] = 0;
+      $context['sandbox']['max'] = count($files);
+    }
+
+    // Load current batch data
+    $this->batchData = $this->state->get("ai_upgrade_assistant.batch.$batch_id", []);
+    $this->batchData['current_module'] = $module;
+
+    foreach ($files as $file) {
+      try {
+        // Analyze file
+        $result = $this->projectAnalyzer->analyzeFile($file, [
+          'module' => $module,
+          'type' => $type,
+        ]);
+
+        // Track results
+        $this->batchData['results'][$file] = $result;
+        $this->batchData['files_processed']++;
+
+        // Update progress
+        $context['sandbox']['progress']++;
+        $context['results']['processed'][] = $file;
+
+        // Calculate progress percentage
+        $progress = ($this->batchData['files_processed'] / $this->batchData['total_files']) * 100;
+        $context['message'] = $this->t('Analyzing @module: @file (@progress%)', [
+          '@module' => $module,
+          '@file' => basename($file),
+          '@progress' => round($progress, 1),
+        ]);
+
       }
+      catch (\Exception $e) {
+        $this->batchData['errors'][$file] = $e->getMessage();
+        watchdog_exception('ai_upgrade_assistant', $e);
+      }
+
+      // Save batch data after each file
+      $this->state->set("ai_upgrade_assistant.batch.$batch_id", $this->batchData);
     }
 
-    // Add theme analysis
-    if ($config->get('scan_themes')) {
-      // TODO: Implement theme analysis
-    }
-
-    return [
-      'operations' => $operations,
-      'finished' => [$this, 'finishBatch'],
-      'title' => $this->t('Analyzing project for upgrade recommendations'),
-      'init_message' => $this->t('Starting analysis...'),
-      'progress_message' => $this->t('Analyzed @current out of @total items.'),
-      'error_message' => $this->t('An error occurred during analysis.'),
-    ];
-  }
-
-  /**
-   * Batch operation: Analyze Drupal core compatibility.
-   */
-  public function analyzeDrupalCore($version, &$context) {
-    $context['message'] = $this->t('Analyzing Drupal core compatibility...');
-    $context['results']['core'] = [
-      'version' => $version,
-      'compatible' => version_compare($version, '10.0.0', '>='),
-    ];
-  }
-
-  /**
-   * Batch operation: Analyze a single file.
-   */
-  public function analyzeFile($file_path, $module_name, $type, &$context) {
-    $context['message'] = $this->t('Analyzing @file...', ['@file' => basename($file_path)]);
-    
-    $code = file_get_contents($file_path);
-    $analysis_context = [
-      'type' => $type,
-      'module_name' => $module_name,
-      'drupal_version' => \Drupal::VERSION,
-      'target_version' => '10.0.0',
-      'file_path' => str_replace(DRUPAL_ROOT . '/', '', $file_path),
-    ];
-
-    $analysis = $this->projectAnalyzer->getOpenAI()->analyzeCode($code, $analysis_context);
-
-    if (!isset($context['results']['files'])) {
-      $context['results']['files'] = [];
-    }
-    $context['results']['files'][$file_path] = $analysis;
-
-    // Store partial results in state for progress tracking
-    $this->state->set('ai_upgrade_assistant.analysis_results', $context['results']);
-  }
-
-  /**
-   * Batch operation: Analyze a module.
-   */
-  public function analyzeModule($name, $info, &$context) {
-    $context['message'] = $this->t('Analyzing module @name...', ['@name' => $name]);
-    
-    if (!isset($context['results']['modules'])) {
-      $context['results']['modules'] = [];
-    }
-
-    $context['results']['modules'][$name] = [
-      'info' => $info,
-      'compatible' => isset($info['core_version_requirement']) && 
-        $this->projectAnalyzer->isCompatibleWithDrupal10($info['core_version_requirement']),
-    ];
+    // Update batch status
+    $context['finished'] = $context['sandbox']['progress'] / $context['sandbox']['max'];
   }
 
   /**
    * Batch finish callback.
+   *
+   * @param bool $success
+   *   Whether the batch succeeded.
+   * @param array $results
+   *   Batch results.
+   * @param array $operations
+   *   Remaining operations.
    */
-  public function finishBatch($success, $results, $operations) {
+  public function batchFinished($success, array $results, array $operations) {
     if ($success) {
-      // Store the final results
-      $this->state->set('ai_upgrade_assistant.analysis_results', $results);
-      $this->state->set('ai_upgrade_assistant.last_analysis', \Drupal::time()->getRequestTime());
-      
-      \Drupal::messenger()->addStatus(t('Project analysis completed successfully.'));
-    }
-    else {
-      \Drupal::messenger()->addError(t('An error occurred during project analysis.'));
-    }
-  }
+      $batch_id = $results['batch_id'];
+      $batch_data = $this->state->get("ai_upgrade_assistant.batch.$batch_id", []);
 
-  /**
-   * Creates a batch for analyzing multiple modules.
-   *
-   * @param array $modules
-   *   Array of module names to analyze.
-   *
-   * @return array
-   *   Batch definition array.
-   */
-  public function createAnalysisBatchForModules(array $modules) {
-    $operations = [];
-    $total_files = 0;
+      // Calculate statistics
+      $duration = time() - $results['start_time'];
+      $files_processed = count($results['processed']);
+      $error_count = count($batch_data['errors']);
 
-    // First pass - count total files
-    foreach ($modules as $module) {
-      $module_path = $this->moduleHandler->getPath($module);
-      if ($module_path) {
-        $files = $this->projectAnalyzer->findPhpFiles($module_path);
-        $total_files += count($files);
-      }
-    }
-
-    // Create batch operations
-    foreach ($modules as $module) {
-      $operations[] = [
-        [$this, 'processModule'],
+      // Log completion
+      \Drupal::logger('ai_upgrade_assistant')->info(
+        'Analysis completed: @files files processed in @time seconds with @errors errors.',
         [
-          $module,
-          \Drupal::currentUser()->id(),
-        ],
-      ];
-    }
+          '@files' => $files_processed,
+          '@time' => $duration,
+          '@errors' => $error_count,
+        ]
+      );
 
-    return [
-      'operations' => $operations,
-      'finished' => [$this, 'finishModuleAnalysis'],
-      'title' => $this->t('Analyzing modules for upgrade compatibility'),
-      'init_message' => $this->t('Starting code analysis...'),
-      'progress_message' => $this->t('Analyzed @current out of @total modules.'),
-      'error_message' => $this->t('Error analyzing modules.'),
-    ];
-  }
-
-  /**
-   * Processes a single module in the batch.
-   *
-   * @param string $module
-   *   Module name.
-   * @param int $uid
-   *   User ID who started the analysis.
-   * @param array $context
-   *   Batch context.
-   */
-  public function processModule($module, $uid, array &$context) {
-    $logger = \Drupal::logger('ai_upgrade_assistant');
-    
-    try {
-      // Initialize progress information
-      if (!isset($context['sandbox']['progress'])) {
-        $context['sandbox']['progress'] = 0;
-        $context['sandbox']['current_module'] = $module;
-        $context['sandbox']['start_time'] = microtime(TRUE);
-        $context['results']['modules_processed'] = 0;
-        $context['results']['files_processed'] = 0;
-      }
-
-      $logger->info('Starting analysis of module: @module', ['@module' => $module]);
-      
-      // Get module path
-      $module_path = $this->moduleHandler->getPath($module);
-      if (!$module_path) {
-        throw new \Exception("Module path not found for $module");
-      }
-
-      // Analyze the module
-      $results = $this->projectAnalyzer->analyzeCustomModule($module, $module_path);
-
-      // Store results
-      $existing_results = $this->state->get('ai_upgrade_assistant.analysis_results', []);
-      $existing_results[$module] = [
-        'results' => $results,
-        'timestamp' => time(),
-        'analyzed_by' => $uid,
-      ];
-      $this->state->set('ai_upgrade_assistant.analysis_results', $existing_results);
-
-      // Update progress
-      $context['sandbox']['progress']++;
-      $context['results']['modules_processed']++;
-      $context['results']['files_processed'] += count($results['files'] ?? []);
-      
-      // Calculate time taken
-      $time_taken = microtime(TRUE) - $context['sandbox']['start_time'];
-      $context['results']['time_taken'][$module] = $time_taken;
+      // Clean up state
+      $this->state->delete("ai_upgrade_assistant.batch.$batch_id");
+      $this->state->delete('ai_upgrade_assistant.current_batch');
 
       // Set message
-      $context['message'] = $this->t('Analyzed module @module (@time seconds)', [
-        '@module' => $module,
-        '@time' => round($time_taken, 2),
-      ]);
-
-      // Store any warnings or errors
-      if (!empty($results['errors'])) {
-        $context['results']['errors'][$module] = $results['errors'];
-      }
-      if (!empty($results['warnings'])) {
-        $context['results']['warnings'][$module] = $results['warnings'];
-      }
-
-      $logger->info('Completed analysis of module: @module in @time seconds', [
-        '@module' => $module,
-        '@time' => round($time_taken, 2),
-      ]);
+      \Drupal::messenger()->addStatus(t(
+        'Analysis completed. Processed @files files in @time seconds with @errors errors.',
+        [
+          '@files' => $files_processed,
+          '@time' => $duration,
+          '@errors' => $error_count,
+        ]
+      ));
     }
-    catch (\Exception $e) {
-      $logger->error('Error analyzing module @module: @error', [
-        '@module' => $module,
-        '@error' => $e->getMessage(),
-      ]);
-      
-      // Store error but continue with next module
-      $context['results']['errors'][$module] = $e->getMessage();
+    else {
+      \Drupal::messenger()->addError(t('An error occurred during analysis.'));
     }
   }
 
   /**
-   * Finish callback for module analysis batch.
+   * Gets the list of modules to analyze.
+   *
+   * @return array
+   *   Array of module names.
    */
-  public function finishModuleAnalysis($success, $results, $operations) {
-    $logger = \Drupal::logger('ai_upgrade_assistant');
-    
-    if ($success) {
-      $message = $this->t('Analyzed @modules modules (@files files) in @time seconds', [
-        '@modules' => $results['modules_processed'],
-        '@files' => $results['files_processed'],
-        '@time' => round(array_sum($results['time_taken']), 2),
-      ]);
-      \Drupal::messenger()->addStatus($message);
-      
-      $logger->info('Batch analysis completed successfully: @message', [
-        '@message' => $message,
-      ]);
+  protected function getModulesToAnalyze() {
+    $modules = [];
+    $config = \Drupal::config('ai_upgrade_assistant.settings');
 
-      // Update last analysis time
-      $this->state->set('ai_upgrade_assistant.last_analysis', time());
+    // Get custom modules
+    if ($config->get('scan_custom_modules')) {
+      $custom_modules = $this->projectAnalyzer->getCustomModules();
+      $modules = array_merge($modules, array_keys($custom_modules));
     }
-    else {
-      $error_message = $this->t('Some errors occurred during analysis.');
-      \Drupal::messenger()->addError($error_message);
-      
-      $logger->error('Batch analysis completed with errors: @errors', [
-        '@errors' => print_r($results['errors'] ?? [], TRUE),
-      ]);
+
+    // Get contributed modules
+    if ($config->get('scan_contrib_modules')) {
+      $contrib_modules = $this->projectAnalyzer->getContribModules();
+      $modules = array_merge($modules, array_keys($contrib_modules));
     }
+
+    return array_unique($modules);
+  }
+
+  /**
+   * Resumes a previously interrupted batch process.
+   *
+   * @param string $batch_id
+   *   The batch ID to resume.
+   *
+   * @return array|null
+   *   The batch definition if resumable, NULL otherwise.
+   */
+  public function resumeBatch($batch_id) {
+    $batch_data = $this->state->get("ai_upgrade_assistant.batch.$batch_id");
+    if (!$batch_data) {
+      return NULL;
+    }
+
+    // Create new batch starting from where we left off
+    $options = [
+      'modules' => [$batch_data['current_module']],
+      'batch_size' => 50,
+    ];
+
+    return $this->createBatch($options);
+  }
+
+  /**
+   * Gets the current batch progress.
+   *
+   * @return array
+   *   Progress information:
+   *   - current_module: Current module being processed.
+   *   - files_processed: Number of files processed.
+   *   - total_files: Total number of files.
+   *   - progress: Progress percentage.
+   *   - errors: Array of errors encountered.
+   */
+  public function getBatchProgress() {
+    $batch_id = $this->state->get('ai_upgrade_assistant.current_batch');
+    if (!$batch_id) {
+      return [];
+    }
+
+    $batch_data = $this->state->get("ai_upgrade_assistant.batch.$batch_id", []);
+    if (empty($batch_data)) {
+      return [];
+    }
+
+    $progress = ($batch_data['files_processed'] / $batch_data['total_files']) * 100;
+
+    return [
+      'current_module' => $batch_data['current_module'],
+      'files_processed' => $batch_data['files_processed'],
+      'total_files' => $batch_data['total_files'],
+      'progress' => round($progress, 1),
+      'errors' => $batch_data['errors'],
+    ];
   }
 }

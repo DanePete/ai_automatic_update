@@ -178,15 +178,119 @@ class PatchGenerator {
     if (empty($change['code_example'])) {
       return $content;
     }
-    
-    // Find the original code block
+
     $lines = explode("\n", $content);
     $original_code = $change['current_code'];
     $new_code = $change['code_example'];
     
-    // Simple replacement for now
-    // TODO: Implement more sophisticated change application
-    return str_replace($original_code, $new_code, $content);
+    // If we have line numbers, use them for more precise replacement
+    if (!empty($change['start_line']) && !empty($change['end_line'])) {
+      $start = $change['start_line'] - 1; // Convert to 0-based index
+      $length = $change['end_line'] - $change['start_line'] + 1;
+      
+      // Verify the original code matches
+      $original_lines = array_slice($lines, $start, $length);
+      $original_block = implode("\n", $original_lines);
+      
+      if (trim($original_block) === trim($original_code)) {
+        // Replace the lines
+        array_splice($lines, $start, $length, explode("\n", $new_code));
+        return implode("\n", $lines);
+      }
+    }
+    
+    // Fallback to string replacement if line numbers don't match
+    // Use regular expressions to handle whitespace variations
+    $escaped_original = preg_quote($original_code, '/');
+    $pattern = "/^[ \t]*" . str_replace("\n", "\\n[ \t]*", $escaped_original) . "[ \t]*$/m";
+    
+    return preg_replace($pattern, $new_code, $content);
+  }
+
+  /**
+   * Validates changes before applying them.
+   *
+   * @param array $changes
+   *   Array of changes to validate.
+   * @param string $file_path
+   *   Path to the file being changed.
+   *
+   * @return array
+   *   Array of validation results with 'valid' boolean and 'errors' array.
+   */
+  public function validateChanges(array $changes, $file_path) {
+    $results = [
+      'valid' => TRUE,
+      'errors' => [],
+    ];
+    
+    $content = file_get_contents($file_path);
+    if ($content === FALSE) {
+      $results['valid'] = FALSE;
+      $results['errors'][] = "Could not read file: $file_path";
+      return $results;
+    }
+    
+    foreach ($changes as $i => $change) {
+      // Check required fields
+      if (empty($change['current_code']) || empty($change['code_example'])) {
+        $results['valid'] = FALSE;
+        $results['errors'][] = "Change $i is missing required fields";
+        continue;
+      }
+      
+      // Verify current code exists in file
+      if (strpos($content, $change['current_code']) === FALSE) {
+        $results['valid'] = FALSE;
+        $results['errors'][] = "Original code for change $i not found in file";
+        continue;
+      }
+      
+      // Validate line numbers if provided
+      if (!empty($change['start_line']) && !empty($change['end_line'])) {
+        $lines = explode("\n", $content);
+        if ($change['start_line'] < 1 || $change['end_line'] > count($lines)) {
+          $results['valid'] = FALSE;
+          $results['errors'][] = "Invalid line numbers for change $i";
+          continue;
+        }
+      }
+      
+      // Basic syntax validation for PHP files
+      if (pathinfo($file_path, PATHINFO_EXTENSION) === 'php') {
+        if (!$this->validatePhpSyntax($change['code_example'])) {
+          $results['valid'] = FALSE;
+          $results['errors'][] = "Invalid PHP syntax in change $i";
+          continue;
+        }
+      }
+    }
+    
+    return $results;
+  }
+
+  /**
+   * Validates PHP syntax.
+   *
+   * @param string $code
+   *   PHP code to validate.
+   *
+   * @return bool
+   *   TRUE if syntax is valid, FALSE otherwise.
+   */
+  protected function validatePhpSyntax($code) {
+    // Create a temporary file
+    $temp_file = tempnam(sys_get_temp_dir(), 'php_syntax_check');
+    file_put_contents($temp_file, "<?php\n" . $code);
+    
+    // Check syntax
+    $process = new Process(['php', '-l', $temp_file]);
+    $process->run();
+    
+    // Clean up
+    unlink($temp_file);
+    
+    return $process->isSuccessful();
   }
 
   /**

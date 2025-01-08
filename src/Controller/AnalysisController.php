@@ -199,6 +199,7 @@ class AnalysisController extends ControllerBase {
             'priority' => 'medium',
             'message' => $this->t('Module @name needs to be updated for Drupal 10 compatibility',
               ['@name' => $name]),
+            'details' => $module['issues'],
           ];
         }
       }
@@ -229,4 +230,143 @@ class AnalysisController extends ControllerBase {
     return $recommendations;
   }
 
+  /**
+   * Analyzes a specific module.
+   *
+   * @param string $module
+   *   The machine name of the module to analyze.
+   *
+   * @return array
+   *   A render array for the analysis page.
+   */
+  public function analyzeModule($module) {
+    $batch = $this->batchAnalyzer->createModuleAnalysisBatch($module);
+    batch_set($batch);
+
+    return [
+      '#type' => 'container',
+      '#attributes' => ['class' => ['module-analysis']],
+      'title' => [
+        '#markup' => $this->t('Analyzing module: @module', ['@module' => $module]),
+      ],
+      'progress' => [
+        '#type' => 'html_tag',
+        '#tag' => 'div',
+        '#attributes' => [
+          'class' => ['analysis-progress'],
+          'id' => 'analysis-progress-wrapper',
+        ],
+      ],
+      '#attached' => [
+        'library' => ['ai_upgrade_assistant/analysis'],
+        'drupalSettings' => [
+          'aiUpgradeAssistant' => [
+            'moduleBeingAnalyzed' => $module,
+          ],
+        ],
+      ],
+    ];
+  }
+
+  /**
+   * Displays details for a specific module.
+   *
+   * @param string $module
+   *   The machine name of the module to display.
+   *
+   * @return array
+   *   A render array for the module details page.
+   */
+  public function moduleDetails($module) {
+    $module_data = $this->state->get('ai_upgrade_assistant.module_analysis.' . $module, []);
+    
+    $build = [
+      '#type' => 'container',
+      '#attributes' => ['class' => ['module-details']],
+    ];
+
+    // Module info
+    $build['info'] = [
+      '#type' => 'container',
+      '#attributes' => ['class' => ['module-info']],
+      'title' => [
+        '#markup' => '<h2>' . $this->t('@module Analysis Results', ['@module' => $module]) . '</h2>',
+      ],
+    ];
+
+    if (empty($module_data)) {
+      $build['info']['content'] = [
+        '#markup' => $this->t('No analysis data available for this module.'),
+      ];
+      return $build;
+    }
+
+    // Status summary
+    $build['status'] = [
+      '#type' => 'container',
+      '#attributes' => ['class' => ['status-summary']],
+      'content' => [
+        '#theme' => 'item_list',
+        '#items' => [
+          $this->t('Compatibility: @status', ['@status' => $module_data['compatibility']]),
+          $this->t('Last Analyzed: @date', ['@date' => date('Y-m-d H:i:s', $module_data['last_analysis'])]),
+          $this->t('Issues Found: @count', ['@count' => count($module_data['issues'])]),
+        ],
+      ],
+    ];
+
+    // Issues list
+    if (!empty($module_data['issues'])) {
+      $build['issues'] = [
+        '#type' => 'container',
+        '#attributes' => ['class' => ['issues-list']],
+        'title' => [
+          '#markup' => '<h3>' . $this->t('Issues Found') . '</h3>',
+        ],
+      ];
+
+      foreach ($module_data['issues'] as $issue) {
+        $build['issues']['list'][] = [
+          '#type' => 'container',
+          '#attributes' => ['class' => ['issue-item']],
+          'title' => [
+            '#markup' => '<h4>' . $issue['title'] . '</h4>',
+          ],
+          'description' => [
+            '#markup' => '<p>' . $issue['description'] . '</p>',
+          ],
+          'file' => [
+            '#markup' => '<code>' . $issue['file'] . ':' . $issue['line'] . '</code>',
+          ],
+          'recommendation' => [
+            '#markup' => '<div class="recommendation">' . $issue['recommendation'] . '</div>',
+          ],
+        ];
+      }
+    }
+
+    // Add actions
+    $build['actions'] = [
+      '#type' => 'container',
+      '#attributes' => ['class' => ['module-actions']],
+      'reanalyze' => [
+        '#type' => 'link',
+        '#title' => $this->t('Reanalyze Module'),
+        '#url' => Url::fromRoute('ai_upgrade_assistant.analyze_module', ['module' => $module]),
+        '#attributes' => [
+          'class' => ['button', 'button--primary'],
+        ],
+      ],
+      'patches' => [
+        '#type' => 'link',
+        '#title' => $this->t('View Patches'),
+        '#url' => Url::fromRoute('ai_upgrade_assistant.module_patches', ['module' => $module]),
+        '#attributes' => [
+          'class' => ['button'],
+        ],
+      ],
+    ];
+
+    return $build;
+  }
 }
