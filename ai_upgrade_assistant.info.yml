@@ -3,6 +3,7 @@ type: module
 description: 'Uses AI to assist with Drupal upgrades and module updates, including Drupal 11 readiness checks.'
 package: Development
 core_version_requirement: ^9 || ^10 || ^11
+version: '0.2.0'
 configure: ai_upgrade_assistant.settings
 dependencies:
   - drupal:system
