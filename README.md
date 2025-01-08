@@ -1,4 +1,4 @@
-# AI Upgrade Assistant
+# AI Automatic Update
 
 A Drupal module that uses OpenAI to analyze and automatically update your Drupal codebase.
 
@@ -15,23 +15,29 @@ A Drupal module that uses OpenAI to analyze and automatically update your Drupal
 
 ## Requirements
 
-- Drupal 9.x, 10.x, or 11.x
+- Drupal 9.x or 10.x
 - PHP 8.1 or higher
 - OpenAI API key (optional)
+- Composer
 
 ## Installation
 
-1. Install via Composer:
+1. Add the repository to your project:
 ```bash
-composer require drupal/ai_upgrade_assistant
+composer config repositories.ai_automatic_update vcs git@github.com:DanePete/ai_automatic_update.git
 ```
 
-2. Enable the module:
+2. Require the module:
+```bash
+composer require danepete/ai_automatic_update:dev-main
+```
+
+3. Enable the module:
 ```bash
 drush en ai_upgrade_assistant
 ```
 
-3. Configure the module at `/admin/config/development/upgrade-assistant/settings`
+4. Configure the module at `/admin/config/development/upgrade-assistant/settings`
 
 ## Configuration
 
@@ -43,22 +49,43 @@ drush en ai_upgrade_assistant
 
 ## Usage
 
-1. Navigate to Reports → Upgrade Status (`/admin/reports/upgrade-status`)
-2. Click on "AI Analysis" tab
-3. Select the modules or themes you want to analyze
-4. Click "Run Analysis"
-5. View the detailed report and suggested fixes
+1. Visit `/admin/reports/upgrade-assistant`
+2. Click "Start Analysis" to begin scanning your codebase
+3. Watch real-time progress in the terminal output
+4. Review recommendations and generated patches
+5. Apply changes automatically or manually
+
+## Features
+
+### Code Analysis
+- Deprecated function detection
+- API changes analysis
+- Security best practices
+- Performance optimization suggestions
+- Coding standards compliance
+
+### Reporting
+- HTML reports with syntax highlighting
+- PDF reports for offline viewing
+- JSON export for integration
+- Module-level statistics
+- File-level details
+
+### Patch Management
+- Automatic patch generation
+- Safety checks before applying
+- Unified and context diff formats
+- Automatic backup creation
+- Batch processing
 
 ## Contributing
 
-- Issues should be reported in the [drupal.org issue queue](https://www.drupal.org/project/issues/ai_upgrade_assistant)
-- Submit patches via drupal.org using the issue queue
-- Follow [Drupal coding standards](https://www.drupal.org/docs/develop/standards)
-
-## Maintainers
-
-- Dane Petersen (DanePete) - https://www.drupal.org/u/danepete
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
 ## License
 
-This project is GPL v2 software. See the LICENSE.txt file in this directory for complete text.
+This project is licensed under the GNU General Public License v2.0 or later.
