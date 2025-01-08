@@ -1,0 +1,11 @@
+AI Upgrade Assistant 1.0.0, 2025-01-08
+--------------------------------
+- Initial release
+- OpenAI-powered code analysis feature
+- Automatic detection of deprecated code
+- Batch processing for large codebases
+- Real-time progress tracking
+- Detailed HTML/PDF reports
+- Automatic patch generation
+- Code diff viewer
+- Configurable file filters
